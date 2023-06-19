@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+
+        <style>
+            textarea {
+                width: 100%;
+            }
+            video {
+                border-style: dotted;
+                border-width: 3px;
+                border-color: green;
+            }
+        </style>
+    </head>
+    <body>
+        <button id="createBtn" onclick="onCreate()">Crear</button>
+        <button id="joinBtn" onclick="onJoin()">Unirse</button>
+
+        <div id="createScreen" style="display: none">
+            <label for="createConnectionText">Connection</label>
+            <textarea id="createConnectionText" readonly rows="4"></textarea>
+            <hr>
+            <label for="createAnswerText">Answer</label>
+            <textarea id="createAnswerText" rows="4"></textarea>
+        </div>
+
+        <div id="joinScreen" style="display: none">
+            <label for="joinConnectionText">Connection</label>
+            <textarea id="joinConnectionText" rows="4"></textarea>
+            <hr>
+            <label for="joinAnswerText">Answer</label>
+            <textarea id="joinAnswerText" readonly rows="4"></textarea>
+        </div>
+
+        <div id="videos"></div>
+
+        <script>
+            // const configuration = {
+            //     iceServers: [
+            //         { urls: 'stun:stun.l.google.com:19302' }
+            //     ],
+            // };
+            async function getConfiguration() {
+                const response = await fetch("https://rdd-ucu.metered.live/api/v1/turn/credentials?apiKey=82f2f8adbeb0144dcf0dfe60ecd39e7810e3");
+                const iceServers = await response.json();
+                // const iceServers = [
+                //     { urls: 'stun:stun.l.google.com:19302' }
+                // ];
+                return {iceServers};
+            }
+
+            function showCreateScreen() {
+                const createBtn = document.getElementById("createBtn");
+                const joinBtn = document.getElementById("joinBtn");
+                const block = document.getElementById("createScreen");
+
+                createBtn.disabled = true;
+                joinBtn.disabled = true;
+                block.style.display = 'block';
+            }
+
+            function showJoinScreen() {
+                const createBtn = document.getElementById("createBtn");
+                const joinBtn = document.getElementById("joinBtn");
+                const block = document.getElementById("joinScreen");
+
+                createBtn.disabled = true;
+                joinBtn.disabled = true;
+                block.style.display = 'block';
+            }
+
+            function onTrack(event) {
+                const videos = document.getElementById("videos");
+                const stream = event.streams[0];
+                const el = document.createElement('video');
+                el.playsInline = true;
+                el.autoplay = true;
+                el.width = 640;
+                el.height = 480;
+                el.srcObject = stream;
+                videos.appendChild(el);
+            }
+
+            async function setupStream(peerConnection) {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: true,
+                });
+
+                stream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, stream);
+                });
+
+                const videos = document.getElementById("videos");
+                const el = document.createElement('video');
+                el.playsInline = true;
+                el.autoplay = true;
+                el.muted = true;
+                el.width = 640;
+                el.height = 480;
+                el.srcObject = stream;
+                videos.appendChild(el);
+            }
+
+            async function onCreate() {
+                showCreateScreen();
+
+                const connectionObject = {
+                    offer: null,
+                    candidates: [],
+                };
+
+                const peerConnection = new RTCPeerConnection(await getConfiguration());
+
+                await setupStream(peerConnection);
+
+                peerConnection.ontrack = onTrack; 
+
+                peerConnection.onicecandidate = async ({ candidate }) => {
+                    if (candidate) {
+                        connectionObject.candidates.push(candidate);
+                    }
+
+                    if (connectionObject.offer) {
+                        document.getElementById("createConnectionText").textContent = JSON.stringify(connectionObject);
+                    }
+                }
+
+                peerConnection.oniceconnectionstatechange = (event) => {
+                    console.log("peerConnection: STATE CHANGE", peerConnection.iceConnectionState);
+                }
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                connectionObject.offer = offer;
+
+                const createAnswerTextEl = document.getElementById("createAnswerText");
+                createAnswerTextEl.onpaste = (event) => {
+                    setTimeout(async () => {
+                        createAnswerTextEl.readOnly = true;
+                        const answerObj = JSON.parse(createAnswerTextEl.value);
+
+                        peerConnection.setRemoteDescription(answerObj.answer);
+
+                        for (const candidate of answerObj.candidates) {
+                            await peerConnection.addIceCandidate(candidate);
+                        }
+                    }, 0);
+                };
+            }
+
+            async function onJoin() {
+                showJoinScreen();
+
+                const answerObject = {
+                    answer: null,
+                    candidates: [],
+                };
+
+                const peerConnection = new RTCPeerConnection(await getConfiguration());
+
+                await setupStream(peerConnection);
+
+                peerConnection.ontrack = onTrack; 
+
+                peerConnection.onicecandidate = async ({ candidate }) => {
+                    if (candidate) {
+                        answerObject.candidates.push(candidate);
+                    }
+                    if (answerObject.answer) {
+                        document.getElementById("joinAnswerText").textContent = JSON.stringify(answerObject);
+                    }
+                }
+
+                peerConnection.oniceconnectionstatechange = (event) => {
+                    console.log("peerConnection: STATE CHANGE", peerConnection.iceConnectionState);
+                }
+
+                const joinConnectionTextEl = document.getElementById("joinConnectionText");
+                joinConnectionTextEl.onpaste = (event) => {
+                    setTimeout(async () => {
+                        joinConnectionTextEl.readOnly = true;
+                        const connectionObj = JSON.parse(joinConnectionTextEl.value);
+
+                        await peerConnection.setRemoteDescription(connectionObj.offer);
+
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+
+                        answerObject.answer = answer;
+                    }, 0);
+                };
+            }
+
+            // async function onInit() {
+            //     const peerConnection2 = new RTCPeerConnection(configuration);
+
+
+
+            //     peerConnection2.onicecandidate = async ({ candidate }) => {
+            //         await peerConnection1.addIceCandidate(candidate);
+            //         console.log("peerConnection1: ADD ICE CANDIDATE", candidate);
+            //     }
+
+            //     peerConnection2.oniceconnectionstatechange = (event) => {
+            //         console.log("peerConnection2: STATE CHANGE", peerConnection2.iceConnectionState);
+            //     }
+
+            //     peerConnection2.ontrack = (event) => {
+            //         document.getElementById("remoteVideo").srcObject = event.streams[0];
+            //     }
+
+
+            //     const offer = await peerConnection1.createOffer();
+            //     await peerConnection1.setLocalDescription(offer);
+
+            //     await peerConnection2.setRemoteDescription(offer);
+            //     const answer = await peerConnection2.createAnswer()
+            //     await peerConnection2.setLocalDescription(answer);
+
+            //     await peerConnection1.setRemoteDescription(answer);
+            // }
+        </script>
+    </body>
+</html>
